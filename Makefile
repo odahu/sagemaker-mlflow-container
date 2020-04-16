@@ -45,7 +45,7 @@ lint:
 
 # build docker image
 docker-build:
-	docker build -t ${DOCKER_IMAGE}:${BUILD_TAG} . -f docker/Dockerfile
+	docker build -t ${DOCKER_IMAGE}:${BUILD_TAG} . -f containers/app/Dockerfile
 
 # create repository for DOCKER_IMAGE if doesn't exists
 ecr-prepare:

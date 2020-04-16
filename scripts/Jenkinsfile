@@ -1,0 +1,68 @@
+Build [version] [next_version] [dockerhub]
+// Bump version to [version]
+// make docker-build BUILD_TAG=:uuid
+// -- Test Container BEGIN (before build train image)
+// make lint
+// make tests_unit
+// -- Prepare for test
+// AWS_REGISTRY=scripts/ecr_prepare.sh
+// make docker-push DOCKER_REGISTRY=$AWS_REGISTRY BUILD_TAG=:uuid TAG=:uuid
+// -- Run tests
+// make tests_integration TEST_SM_ROLE=${TEST_SM_ROLE} TEST_IMAGE${TEST_IMAGE}
+
+pipeline {
+    agent { label 'ec2orchestrator' }
+
+    environment {
+        // Repository parameters
+        odahuGithubCredsID = "63e5abfa-a815-4671-937f-7e00b1e45725"
+        // GCP parameters
+        gcpProjectID = "or2-msq-epmd-legn-t1iylu"
+        gcpLocation = "us-east1"
+        gcpCloudCredsID = "gcp-epmd-legn-legion-automation"
+
+        uploadBaseDataset = "${params.uploadBaseDataset}"
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                cleanWs()
+                script {
+                    currentBuild.description = "${ComposerName} ${params.GitBranch}"
+                    sshagent([odahuGithubCredsID]) {
+                        sh """#!/bin/bash -ex
+                               #TODO get repo url from passed parameters
+                               mkdir -p \$(getent passwd \$(whoami) | cut -d: -f6)/.ssh && ssh-keyscan github.com >> \$(getent passwd \$(whoami) | cut -d: -f6)/.ssh/known_hosts
+                               git clone ${params.GitRepo} ./
+                               git checkout ${params.GitBranch}
+                           """
+                    }
+                }
+            }
+        }
+
+        stage('Lint code') {
+            steps {
+                script {
+
+                }
+            }
+        }
+
+        stage('Unit tests') {
+            steps {
+                script {
+
+                }
+            }
+        }
+
+    }
+
+    post {
+        cleanup {
+            deleteDir()
+        }
+    }
+}
