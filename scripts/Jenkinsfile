@@ -1,4 +1,4 @@
-Build [version] [next_version] [dockerhub]
+// Build [version] [next_version] [dockerhub]
 // Bump version to [version]
 // make docker-build BUILD_TAG=:uuid
 // -- Test Container BEGIN (before build train image)
@@ -41,22 +41,22 @@ pipeline {
                 }
             }
         }
-
-        stage('Lint code') {
-            steps {
-                script {
-
-                }
-            }
-        }
-
-        stage('Unit tests') {
-            steps {
-                script {
-
-                }
-            }
-        }
+//
+//        stage('Lint code') {
+//            steps {
+//                script {
+//
+//                }
+//            }
+//        }
+//
+//        stage('Unit tests') {
+//            steps {
+//                script {
+//
+//                }
+//            }
+//        }
 
     }
 
