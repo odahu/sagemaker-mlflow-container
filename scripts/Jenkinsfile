@@ -20,8 +20,6 @@ pipeline {
         gcpProjectID = "or2-msq-epmd-legn-t1iylu"
         gcpLocation = "us-east1"
         gcpCloudCredsID = "gcp-epmd-legn-legion-automation"
-
-        uploadBaseDataset = "${params.uploadBaseDataset}"
     }
 
     stages {
@@ -29,7 +27,7 @@ pipeline {
             steps {
                 cleanWs()
                 script {
-                    currentBuild.description = "${ComposerName} ${params.GitBranch}"
+                    currentBuild.description = "${dockerRepositoryName} ${params.GitBranch}"
                     sshagent([odahuGithubCredsID]) {
                         sh """#!/bin/bash -ex
                                #TODO get repo url from passed parameters
@@ -41,22 +39,34 @@ pipeline {
                 }
             }
         }
+        stage('Build test env image') {
+            steps {
+                script {
+                    docker.build("odahu/sagemaker-mlflow-container-test:latest", "-f containers/app-test-env/Dockerfile .")
+                }
+            }
+        }
+        stage('Lint code') {
+            steps {
+                script {
+                    docker.image("odahu/sagemaker-mlflow-container-test:latest").inside(){
+                        sh "flake8 src/sagemaker_mlflow_container"
+                        sh "flake8 tests --exclude=resources"
+                        sh "pytest -s tests/unit"
+                    }
+                }
+            }
+        }
+        stage('Unit tests') {
+            steps {
+                script {
+                    docker.image("odahu/sagemaker-mlflow-container-test:latest").inside(){
+                        sh "pytest -s tests/unit"
+                    }
+                }
+            }
+        }
 //
-//        stage('Lint code') {
-//            steps {
-//                script {
-//
-//                }
-//            }
-//        }
-//
-//        stage('Unit tests') {
-//            steps {
-//                script {
-//
-//                }
-//            }
-//        }
 
     }
 
