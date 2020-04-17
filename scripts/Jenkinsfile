@@ -16,11 +16,11 @@ pipeline {
     parameters {
         string(defaultValue: 'odahu/sagemaker-mlflow-container', name: 'imageName', description: 'Name of result docker image')
         string(name: 'ecrRegistry', description: 'ECR Registry for SageMaker containers')
-        string(name: 'ecrTestRegistry', description: 'ECR Registry for SageMaker containers ' +
-                'that were used only while testing. The pushed images will be cleaned after job finish')
         string(defaultValue: 'eu-central-1', name: 'awsRegion', description: 'AWS region')
         string(name: 'awsCredentialsEnvFile', description: 'AWS credentials environment file')
         string(name: 'sagemakerRole', description: 'Sagemaker role')
+        booleanParam(name: 'stableRelease', defaultValue: false, description: 'If true – bump version before release and bump to next dev version')
+        string(name: 'releaseVersion', description: 'Release version', defaultValue: 'latest')
     }
 
     environment {
@@ -28,10 +28,13 @@ pipeline {
         imageName = "${params.imageName}"
         awsRegion = "${params.awsRegion}"
         awsCredentialsId = "${params.awsCredentialsEnvFile}"
-        registry = "${params.ecrTestRegistry}"
+        registry = "${params.ecrRegistry}"
         sagemakerRole = "${params.sagemakerRole}"
 
         testBuildTag = UUID.randomUUID().toString()
+        testingImage = "${params.ecrRegistry}/${params.imageName}:${env.testBuildTag}"
+
+        testEnvironmentImage = "test-environment:latest"
     }
 
     stages {
@@ -41,37 +44,10 @@ pipeline {
                 checkout scm
             }
         }
-        stage('Build test env image') {
+
+        stage('Login ECR') {
             steps {
                 script {
-                    docker.build("${env.imageName}-test:${env.testBuildTag}", "-f containers/app-test-env/Dockerfile .")
-                }
-            }
-        }
-        stage('Lint code') {
-            steps {
-                script {
-                    docker.image("${env.imageName}-test:${env.testBuildTag}").inside(){
-                        sh "flake8 src/sagemaker_mlflow_container"
-                        sh "flake8 tests --exclude=resources"
-                        sh "pytest -s tests/unit"
-                    }
-                }
-            }
-        }
-        stage('Unit tests') {
-            steps {
-                script {
-                    docker.image("${env.imageName}-test:${env.testBuildTag}").inside(){
-                        sh "pytest -s tests/unit"
-                    }
-                }
-            }
-        }
-        stage('Login docker') {
-            steps {
-                script {
-                    def testBuildTag = UUID.randomUUID().toString()
                     withCredentials([file(credentialsId: env.awsCredentialsId, variable: 'awsCredentialsId')]) {
                         sh returnStdout: true, script: """
                                                docker run --env-file ${awsCredentialsId} \
@@ -82,13 +58,29 @@ pipeline {
                 }
             }
         }
-        stage('Prepare container for integration testing') {
+
+        stage("Build"){
+            steps {
+
+                script {  // Build test environment
+                    docker.build("${env.testEnvironmentImage}", "-f containers/app-test-env/Dockerfile .")
+                }
+
+                script {  // Build temporary artifact image that we will use during tha training and remove in the end
+                    sh """ docker build -t ${env.testingImage} . -f containers/app/Dockerfile && \
+                           docker push ${env.testingImage}
+                    """
+                }
+            }
+        }
+        stage('Unit tests') {
             steps {
                 script {
-                    env.testBuildTag = UUID.randomUUID().toString()
-                    sh """ docker build -t ${env.registry}/${env.imageName}:${testBuildTag} . -f containers/app/Dockerfile && \
-                           docker push ${env.registry}/${env.imageName}:${testBuildTag}
-                    """
+                    docker.image("${env.testEnvironmentImage}").inside(){
+                        sh "flake8 src/sagemaker_mlflow_container"
+                        sh "flake8 tests --exclude=resources"
+                        sh "pytest -s tests/unit"
+                    }
                 }
             }
         }
@@ -104,8 +96,8 @@ pipeline {
                         -e TEST_RESOURCES="${env.WORKSPACE}/tests/integration/resources"
                          """
 
-                        docker.image("${env.imageName}-test:${env.testBuildTag}").inside(dockerArgs) {
-                            sh "pytest -s tests/integration --image ${env.registry}/${env.imageName}:${testBuildTag} --sagemaker-role ${env.sagemakerRole}"
+                        docker.image("${env.testEnvironmentImage}").inside(dockerArgs) {
+                            sh "pytest -s tests/integration --image ${env.testingImage} --sagemaker-role ${env.sagemakerRole}"
                             sh "rm -rf tests/integration/__pycache__"
                             sh "rm -rf .pytest_cache"
                         }
