@@ -33,17 +33,7 @@ pipeline {
         stage('Checkout') {
             steps {
                 cleanWs()
-                script {
-                    currentBuild.description = "${dockerRepositoryName} ${params.GitBranch}"
-                    sshagent([odahuGithubCredsID]) {
-                        sh """#!/bin/bash -ex
-                               #TODO get repo url from passed parameters
-                               mkdir -p \$(getent passwd \$(whoami) | cut -d: -f6)/.ssh && ssh-keyscan github.com >> \$(getent passwd \$(whoami) | cut -d: -f6)/.ssh/known_hosts
-                               git clone ${params.GitRepo} ./
-                               git checkout ${params.GitBranch}
-                           """
-                    }
-                }
+                checkout scm
             }
         }
         stage('Build test env image') {
