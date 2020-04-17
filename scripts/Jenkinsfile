@@ -21,6 +21,8 @@ pipeline {
         awsCredentialsId = "AWS_LEGN_CREDENTIALS"
         testBuildTag = "test-temp"
         registry = "505502776526.dkr.ecr.eu-central-1.amazonaws.com"
+        sagemakerRole = "AmazonSageMaker-ExecutionRole-20191219T122808"
+
     }
 
     stages {
@@ -43,14 +45,14 @@ pipeline {
         stage('Build test env image') {
             steps {
                 script {
-                    docker.build("odahu/sagemaker-mlflow-container-test:latest", "-f containers/app-test-env/Dockerfile .")
+                    docker.build("${env.imageName}-test:${env.testBuildTag}", "-f containers/app-test-env/Dockerfile .")
                 }
             }
         }
         stage('Lint code') {
             steps {
                 script {
-                    docker.image("odahu/sagemaker-mlflow-container-test:latest").inside(){
+                    docker.image("${env.imageName}-test:${env.testBuildTag}").inside(){
                         sh "flake8 src/sagemaker_mlflow_container"
                         sh "flake8 tests --exclude=resources"
                         sh "pytest -s tests/unit"
@@ -61,7 +63,7 @@ pipeline {
         stage('Unit tests') {
             steps {
                 script {
-                    docker.image("odahu/sagemaker-mlflow-container-test:latest").inside(){
+                    docker.image("${env.imageName}-test:${env.testBuildTag}").inside(){
                         sh "pytest -s tests/unit"
                     }
                 }
@@ -74,7 +76,7 @@ pipeline {
                     withCredentials([file(credentialsId: env.awsCredentialsId, variable: 'awsCredentialsId')]) {
                         sh returnStdout: true, script: """
                                                docker run --env-file ${awsCredentialsId} \
-                                               amazon/aws-cli ecr get-login-password --region ${awsRegion}  \
+                                               amazon/aws-cli ecr get-login-password --region ${env.awsRegion}  \
                                                | docker login --username AWS --password-stdin ${env.registry}
                                                 """
                     }
@@ -94,10 +96,20 @@ pipeline {
         stage('Integration tests') {
             steps {
                 script {
-                    env.testBuildTag = UUID.randomUUID().toString()
-                    sh """ docker build -t ${env.registry}/${env.imageName}:${testBuildTag} . -f containers/app/Dockerfile && \
-                           docker push ${env.registry}/${env.imageName}:${testBuildTag}
-                    """
+
+                    withCredentials([file(credentialsId: env.awsCredentialsId, variable: 'awsCredentialsId')]) {
+
+                        def dockerArgs = """
+                        -u root --env-file ${awsCredentialsId} -e AWS_DEFAULT_REGION=${env.awsRegion} 
+                        -v /var/run/docker.sock:/var/run/docker.sock -v /tmp:/tmp
+                        -e TEST_RESOURCES="${env.WORKSPACE}/tests/integration/resources"
+                         """
+
+                        docker.image("${env.imageName}-test:${env.testBuildTag}").inside(dockerArgs) {
+                            sh "pytest -s tests/integration --image ${env.registry}/${env.imageName}:${testBuildTag} --sagemaker-role ${env.sagemakerRole}"
+                            sh "rm -rf tests/integration/__pycache__"
+                        }
+                    }
                 }
             }
         }
@@ -106,15 +118,15 @@ pipeline {
 
     post {
         cleanup {
-            script {
-                withCredentials([file(credentialsId: env.awsCredentialsId, variable: 'awsCredentialsId')]) {
-                    sh """
-               docker run --env-file ${awsCredentialsId} \
-               amazon/aws-cli ecr batch-delete-image --region ${awsRegion} \
-               --repository-name ${env.imageName} --image-ids imageTag=${testBuildTag}
-                """
-                }
-            }
+//            script {
+//                withCredentials([file(credentialsId: env.awsCredentialsId, variable: 'awsCredentialsId')]) {
+//                    sh """
+//               docker run --env-file ${awsCredentialsId} \
+//               amazon/aws-cli ecr batch-delete-image --region ${awsRegion} \
+//               --repository-name ${env.imageName} --image-ids imageTag=${testBuildTag}
+//                """
+//                }
+//            }
             deleteDir()
         }
     }
