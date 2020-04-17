@@ -16,10 +16,11 @@ pipeline {
     environment {
         // Repository parameters
         odahuGithubCredsID = "63e5abfa-a815-4671-937f-7e00b1e45725"
-        // GCP parameters
-        gcpProjectID = "or2-msq-epmd-legn-t1iylu"
-        gcpLocation = "us-east1"
-        gcpCloudCredsID = "gcp-epmd-legn-legion-automation"
+        awsRegion = "eu-central-1"
+        imageName = "odahu/sagemaker-mlflow-container"
+        awsCredentialsId = "AWS_LEGN_CREDENTIALS"
+        testBuildTag = "test-temp"
+        registry = "505502776526.dkr.ecr.eu-central-1.amazonaws.com"
     }
 
     stages {
@@ -66,12 +67,54 @@ pipeline {
                 }
             }
         }
-//
+        stage('Login docker') {
+            steps {
+                script {
+                    def testBuildTag = UUID.randomUUID().toString()
+                    withCredentials([file(credentialsId: env.awsCredentialsId, variable: 'awsCredentialsId')]) {
+                        sh returnStdout: true, script: """
+                                               docker run --env-file ${awsCredentialsId} \
+                                               amazon/aws-cli ecr get-login-password --region ${awsRegion}  \
+                                               | docker login --username AWS --password-stdin ${env.registry}
+                                                """
+                    }
+                }
+            }
+        }
+        stage('Prepare container for integration testing') {
+            steps {
+                script {
+                    env.testBuildTag = UUID.randomUUID().toString()
+                    sh """ docker build -t ${env.registry}/${env.imageName}:${testBuildTag} . -f containers/app/Dockerfile && \
+                           docker push ${env.registry}/${env.imageName}:${testBuildTag}
+                    """
+                }
+            }
+        }
+        stage('Integration tests') {
+            steps {
+                script {
+                    env.testBuildTag = UUID.randomUUID().toString()
+                    sh """ docker build -t ${env.registry}/${env.imageName}:${testBuildTag} . -f containers/app/Dockerfile && \
+                           docker push ${env.registry}/${env.imageName}:${testBuildTag}
+                    """
+                }
+            }
+        }
 
     }
 
     post {
         cleanup {
+            script {
+                withCredentials([file(credentialsId: env.awsCredentialsId, variable: 'awsCredentialsId')]) {
+                    sh """
+               docker run --env-file ${awsCredentialsId} \
+               amazon/aws-cli ecr batch-delete-image --region ${awsRegion} \
+               --repository-name ${env.imageName} --image-ids imageTag=${testBuildTag}
+                """
+                }
+            }
             deleteDir()
         }
     }

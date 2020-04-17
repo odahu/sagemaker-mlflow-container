@@ -1,3 +1,4 @@
+import os
 import uuid
 from os import path
 
@@ -19,7 +20,10 @@ def pytest_addoption(parser):
 
 @pytest.fixture(scope='session')
 def resources_folder():
-    return path.join(path.dirname(__file__), RESOURCES)
+    # we need to have ability to pass resources folder from host (while testing in docker)
+    default_resources = path.join(path.dirname(__file__), RESOURCES)
+    resources = os.environ.get('TEST_RESOURCES', default_resources)
+    return resources
 
 
 @pytest.fixture
