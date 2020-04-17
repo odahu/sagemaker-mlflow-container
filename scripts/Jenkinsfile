@@ -29,7 +29,7 @@ pipeline {
         awsRegion = "${params.awsRegion}"
         awsCredentialsId = "${params.awsCredentialsEnvFile}"
         registry = "${params.ecrTestRegistry}"
-        sagemakerRole = ${params.sagemakerRole}
+        sagemakerRole = "${params.sagemakerRole}"
 
         testBuildTag = UUID.randomUUID().toString()
     }
