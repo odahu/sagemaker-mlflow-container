@@ -15,13 +15,16 @@ pipeline {
 
     parameters {
         string(defaultValue: 'odahu/sagemaker-mlflow-container', name: 'imageName', description: 'Name of result docker image')
+        string(name: 'ecrRegistry', description: 'ECR Registry for SageMaker containers')
+        string(defaultValue: 'eu-central-1', name: 'awsRegion', description: 'AWS region')
+        string(name: 'awsCredentialsEnvFile', description: 'AWS credentials environment file')
+        string(name: 'sagemakerRole', description: 'Sagemaker role')
     }
 
     environment {
         // Repository parameters
         imageName = "${params.imageName}"
-        odahuGithubCredsID = "63e5abfa-a815-4671-937f-7e00b1e45725"
-        awsRegion = "eu-central-1"
+        awsRegion = "${params.awsRegion}"
         awsCredentialsId = "AWS_LEGN_CREDENTIALS"
         testBuildTag = "test-temp"
         registry = "505502776526.dkr.ecr.eu-central-1.amazonaws.com"
