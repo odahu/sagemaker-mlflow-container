@@ -19,7 +19,7 @@ pipeline {
 
     environment {
         // Repository parameters
-        imageName = params.imageName
+        imageName = "${params.imageName}"
         odahuGithubCredsID = "63e5abfa-a815-4671-937f-7e00b1e45725"
         awsRegion = "eu-central-1"
         awsCredentialsId = "AWS_LEGN_CREDENTIALS"
