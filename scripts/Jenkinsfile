@@ -27,11 +27,11 @@ pipeline {
         // Repository parameters
         imageName = "${params.imageName}"
         awsRegion = "${params.awsRegion}"
-        awsCredentialsId = "AWS_LEGN_CREDENTIALS"
-        testBuildTag = "test-temp"
-        registry = "505502776526.dkr.ecr.eu-central-1.amazonaws.com"
-        sagemakerRole = "AmazonSageMaker-ExecutionRole-20191219T122808"
+        awsCredentialsId = "${params.awsCredentialsEnvFile}"
+        registry = "${params.ecrTestRegistry}"
+        sagemakerRole = ${params.sagemakerRole}
 
+        testBuildTag = UUID.randomUUID().toString()
     }
 
     stages {
