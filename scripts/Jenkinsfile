@@ -108,6 +108,7 @@ pipeline {
                         docker.image("${env.imageName}-test:${env.testBuildTag}").inside(dockerArgs) {
                             sh "pytest -s tests/integration --image ${env.registry}/${env.imageName}:${testBuildTag} --sagemaker-role ${env.sagemakerRole}"
                             sh "rm -rf tests/integration/__pycache__"
+                            sh "rm -rf .pytest_cache"
                         }
                     }
                 }
