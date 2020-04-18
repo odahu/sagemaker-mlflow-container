@@ -14,26 +14,26 @@ pipeline {
     agent { label 'ec2orchestrator' }
 
     parameters {
-        string(defaultValue: 'odahu/sagemaker-mlflow-container', name: 'imageName', description: 'Name of result docker image')
+        booleanParam(name: 'stableRelease', defaultValue: false, description: 'If true – push image with tag = version from VERSION file to ECR and DockerHub registry')
+        string(name: 'imageName', defaultValue: 'odahu/sagemaker-mlflow-container', description: 'Name of result docker image')
+        string(name: 'awsRegion', defaultValue: 'eu-central-1', description: 'AWS region')
+
         string(name: 'ecrRegistry', description: 'ECR Registry for SageMaker containers')
-        string(defaultValue: 'eu-central-1', name: 'awsRegion', description: 'AWS region')
         string(name: 'awsCredentialsEnvFile', description: 'AWS credentials environment file')
         string(name: 'sagemakerRole', description: 'Sagemaker role')
-        booleanParam(name: 'stableRelease', defaultValue: false, description: 'If true – bump version before release and bump to next dev version')
-        string(name: 'releaseVersion', description: 'Release version', defaultValue: 'latest')
     }
 
     environment {
-        // Repository parameters
-        imageName = "${params.imageName}"
-        awsRegion = "${params.awsRegion}"
+
+        // Hidden parameters
         awsCredentialsId = "${params.awsCredentialsEnvFile}"
         registry = "${params.ecrRegistry}"
         sagemakerRole = "${params.sagemakerRole}"
-
+        stableRelease = "${params.stableRelease}"
+        awsRegion = "${params.awsRegion}"
+        imageName = "${params.imageName}"
         testBuildTag = UUID.randomUUID().toString()
         testingImage = "${params.ecrRegistry}/${params.imageName}:${env.testBuildTag}"
-
         testEnvironmentImage = "test-environment:latest"
     }
 
@@ -105,20 +105,32 @@ pipeline {
                 }
             }
         }
+        stage('Release'){
+            when{
+                expression {env.stableRelease == true}
+            }
+            steps{
+                script{
+                    echo "Tag with version"
+                    echo "Push ECR"
+                    echo "Push DockerHub"
+                }
+            }
+        }
 
     }
 
     post {
         cleanup {
-//            script {
-//                withCredentials([file(credentialsId: env.awsCredentialsId, variable: 'awsCredentialsId')]) {
-//                    sh """
-//               docker run --env-file ${awsCredentialsId} \
-//               amazon/aws-cli ecr batch-delete-image --region ${awsRegion} \
-//               --repository-name ${env.imageName} --image-ids imageTag=${testBuildTag}
-//                """
-//                }
-//            }
+            script { // Remove temporary image that was used during testing
+                withCredentials([file(credentialsId: env.awsCredentialsId, variable: 'awsCredentialsId')]) {
+                sh """  
+                   docker run --env-file ${awsCredentialsId} \
+                   amazon/aws-cli ecr batch-delete-image --region ${awsRegion} \
+                   --repository-name ${env.imageName} --image-ids imageTag=${testBuildTag}
+                """
+                }
+            }
             deleteDir()
         }
     }
