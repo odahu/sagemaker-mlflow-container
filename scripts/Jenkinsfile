@@ -110,10 +110,29 @@ pipeline {
                 expression {env.stableRelease == true}
             }
             steps{
+                script{ // login into dockerhub
+                    withCredentials(
+                            [[
+                                     $class          : 'UsernamePasswordMultiBinding',
+                                     credentialsId   : 'dockerhub',
+                                     usernameVariable: 'USERNAME',
+                                     passwordVariable: 'PASSWORD'
+                             ]]) {
+                        sh "docker login -u ${USERNAME} -p ${PASSWORD}"
+                    }
+                }
+                script {
+                    def releaseVersion = sh returnStdout: true, script "cat VERSION"
+                    def releaseImage = "${params.imageName}:{$releaseVersion}"
+                    sh """
+                    docker tag ${env.testingImage} ${env.ecrRegistry}/${releaseImage} && \
+                    docker tag ${env.testingImage} ${releaseImage} && \
+                    docker push ${env.ecrRegistry}/${releaseImage} && \
+                    docker push ${releaseImage}
+                    """
+                }
                 script{
-                    echo "Tag with version"
-                    echo "Push ECR"
-                    echo "Push DockerHub"
+                    echo "Tag version"
                 }
             }
         }
