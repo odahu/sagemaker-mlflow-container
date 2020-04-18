@@ -21,11 +21,11 @@ pipeline {
         string(name: 'ecrRegistry', description: 'ECR Registry for SageMaker containers')
         string(name: 'awsCredentialsEnvFile', description: 'AWS credentials environment file')
         string(name: 'sagemakerRole', description: 'Sagemaker role')
+        string(name: 'gitDeployKey', description: 'git deployment key for pushing release tags')
     }
 
     environment {
 
-        // Hidden parameters
         awsCredentialsId = "${params.awsCredentialsEnvFile}"
         registry = "${params.ecrRegistry}"
         sagemakerRole = "${params.sagemakerRole}"
@@ -35,6 +35,7 @@ pipeline {
         testBuildTag = UUID.randomUUID().toString()
         testingImage = "${params.ecrRegistry}/${params.imageName}:${env.testBuildTag}"
         testEnvironmentImage = "test-environment:latest"
+        GitDeployKey = "${params.gitDeployKey}"
     }
 
     stages {
@@ -107,7 +108,7 @@ pipeline {
         }
         stage('Release'){
             when{
-                expression {env.stableRelease == true}
+                expression {env.stableRelease == "true"}
             }
             steps{
                 script{ // login into dockerhub
@@ -132,7 +133,19 @@ pipeline {
                     """
                 }
                 script{
-                    echo "Tag version"
+                    print('Set Release tag')
+                    def releaseVersion = sh returnStdout: true, script "cat VERSION"
+                    sshagent([env.GitDeployKey]) {
+                        sh """#!/bin/bash -ex
+                            if [ `git tag | grep -x ${releaseVersion}` ]; then
+                                echo 'Removing existing git tag'
+                                git tag -d ${releaseVersion}
+                                git push origin :refs/tags/${releaseVersion}
+                            fi
+                            git tag ${releaseVersion}
+                            git push origin ${releaseVersion}
+                        """
+                    }
                 }
             }
         }
@@ -145,8 +158,8 @@ pipeline {
                 withCredentials([file(credentialsId: env.awsCredentialsId, variable: 'awsCredentialsId')]) {
                 sh """  
                    docker run --env-file ${awsCredentialsId} \
-                   amazon/aws-cli ecr batch-delete-image --region ${awsRegion} \
-                   --repository-name ${env.imageName} --image-ids imageTag=${testBuildTag}
+                   amazon/aws-cli ecr batch-delete-image --region $env.{awsRegion} \
+                   --repository-name ${env.imageName} --image-ids imageTag=${env.testBuildTag}
                 """
                 }
             }
