@@ -33,7 +33,6 @@ pipeline {
         awsRegion = "${params.awsRegion}"
         imageName = "${params.imageName}"
         testBuildTag = UUID.randomUUID().toString()
-        testingImage = "${params.ecrRegistry}/${params.imageName}:${env.testBuildTag}"
         testEnvironmentImage = "test-environment:latest"
         GitDeployKey = "${params.gitDeployKey}"
     }
@@ -68,8 +67,8 @@ pipeline {
                 }
 
                 script {  // Build temporary artifact image that we will use during tha training and remove in the end
-                    sh """ docker build -t ${env.testingImage} . -f containers/app/Dockerfile && \
-                           docker push ${env.testingImage}
+                    sh """ docker build -t ${params.ecrRegistry}/${params.imageName}:${env.testBuildTag} . -f containers/app/Dockerfile && \
+                           docker push ${params.ecrRegistry}/${params.imageName}:${env.testBuildTag}
                     """
                 }
             }
@@ -98,7 +97,7 @@ pipeline {
                          """
 
                         docker.image("${env.testEnvironmentImage}").inside(dockerArgs) {
-                            sh "pytest -s tests/integration --image ${env.testingImage} --sagemaker-role ${env.sagemakerRole}"
+                            sh "pytest -s tests/integration --image ${params.ecrRegistry}/${params.imageName}:${env.testBuildTag} --sagemaker-role ${env.sagemakerRole}"
                             sh "rm -rf tests/integration/__pycache__"
                             sh "rm -rf .pytest_cache"
                         }
@@ -123,18 +122,19 @@ pipeline {
                     }
                 }
                 script {
-                    def releaseVersion = sh returnStdout: true, script "cat VERSION"
-                    def releaseImage = "${params.imageName}:{$releaseVersion}"
+                    def releaseVersion = readFile "${env.WORKSPACE}/VERSION"
+                    echo "${releaseVersion}"
+                    def releaseImage = "${params.imageName}:${releaseVersion}"
                     sh """
-                    docker tag ${env.testingImage} ${env.ecrRegistry}/${releaseImage} && \
-                    docker tag ${env.testingImage} ${releaseImage} && \
+                    docker tag ${params.ecrRegistry}/${params.imageName}:${env.testBuildTag} ${env.ecrRegistry}/${releaseImage} && \
+                    docker tag ${params.ecrRegistry}/${params.imageName}:${env.testBuildTag} ${releaseImage} && \
                     docker push ${env.ecrRegistry}/${releaseImage} && \
                     docker push ${releaseImage}
                     """
                 }
                 script{
                     print('Set Release tag')
-                    def releaseVersion = sh returnStdout: true, script "cat VERSION"
+                    def releaseVersion = readFile "${env.WORKSPACE}/VERSION"
                     sshagent([env.GitDeployKey]) {
                         sh """#!/bin/bash -ex
                             if [ `git tag | grep -x ${releaseVersion}` ]; then
