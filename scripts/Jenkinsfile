@@ -158,7 +158,7 @@ pipeline {
                 withCredentials([file(credentialsId: env.awsCredentialsId, variable: 'awsCredentialsId')]) {
                 sh """  
                    docker run --env-file ${awsCredentialsId} \
-                   amazon/aws-cli ecr batch-delete-image --region $env.{awsRegion} \
+                   amazon/aws-cli ecr batch-delete-image --region ${env.awsRegion} \
                    --repository-name ${env.imageName} --image-ids imageTag=${env.testBuildTag}
                 """
                 }
