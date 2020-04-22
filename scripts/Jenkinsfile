@@ -1,0 +1,169 @@
+// Build [version] [next_version] [dockerhub]
+// Bump version to [version]
+// make docker-build BUILD_TAG=:uuid
+// -- Test Container BEGIN (before build train image)
+// make lint
+// make tests_unit
+// -- Prepare for test
+// AWS_REGISTRY=scripts/ecr_prepare.sh
+// make docker-push DOCKER_REGISTRY=$AWS_REGISTRY BUILD_TAG=:uuid TAG=:uuid
+// -- Run tests
+// make tests_integration TEST_SM_ROLE=${TEST_SM_ROLE} TEST_IMAGE${TEST_IMAGE}
+
+pipeline {
+    agent { label 'ec2orchestrator' }
+
+    parameters {
+        booleanParam(name: 'stableRelease', defaultValue: false, description: 'If true – push image with tag = version from VERSION file to ECR and DockerHub registry')
+        string(name: 'imageName', defaultValue: 'odahu/sagemaker-mlflow-container', description: 'Name of result docker image')
+        string(name: 'awsRegion', defaultValue: 'eu-central-1', description: 'AWS region')
+
+        string(name: 'ecrRegistry', description: 'ECR Registry for SageMaker containers')
+        string(name: 'awsCredentialsEnvFile', description: 'AWS credentials environment file')
+        string(name: 'sagemakerRole', description: 'Sagemaker role')
+        string(name: 'gitDeployKey', description: 'git deployment key for pushing release tags')
+    }
+
+    environment {
+
+        awsCredentialsId = "${params.awsCredentialsEnvFile}"
+        registry = "${params.ecrRegistry}"
+        sagemakerRole = "${params.sagemakerRole}"
+        stableRelease = "${params.stableRelease}"
+        awsRegion = "${params.awsRegion}"
+        imageName = "${params.imageName}"
+        testBuildTag = UUID.randomUUID().toString()
+        testEnvironmentImage = "test-environment:latest"
+        GitDeployKey = "${params.gitDeployKey}"
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                cleanWs()
+                checkout scm
+            }
+        }
+
+        stage('Login ECR') {
+            steps {
+                script {
+                    withCredentials([file(credentialsId: env.awsCredentialsId, variable: 'awsCredentialsId')]) {
+                        sh returnStdout: true, script: """
+                                               docker run --env-file ${awsCredentialsId} \
+                                               amazon/aws-cli ecr get-login-password --region ${env.awsRegion}  \
+                                               | docker login --username AWS --password-stdin ${env.registry}
+                                                """
+                    }
+                }
+            }
+        }
+
+        stage("Build"){
+            steps {
+
+                script {  // Build test environment
+                    docker.build("${env.testEnvironmentImage}", "-f containers/app-test-env/Dockerfile .")
+                }
+
+                script {  // Build temporary artifact image that we will use during tha training and remove in the end
+                    sh """ docker build -t ${params.ecrRegistry}/${params.imageName}:${env.testBuildTag} . -f containers/app/Dockerfile && \
+                           docker push ${params.ecrRegistry}/${params.imageName}:${env.testBuildTag}
+                    """
+                }
+            }
+        }
+        stage('Unit tests') {
+            steps {
+                script {
+                    docker.image("${env.testEnvironmentImage}").inside(){
+                        sh "flake8 src/sagemaker_mlflow_container"
+                        sh "flake8 tests --exclude=resources"
+                        sh "pytest -s tests/unit"
+                    }
+                }
+            }
+        }
+        stage('Integration tests') {
+            steps {
+                script {
+
+                    withCredentials([file(credentialsId: env.awsCredentialsId, variable: 'awsCredentialsId')]) {
+
+                        def dockerArgs = """
+                        -u root --env-file ${awsCredentialsId} -e AWS_DEFAULT_REGION=${env.awsRegion} 
+                        -v /var/run/docker.sock:/var/run/docker.sock -v /tmp:/tmp
+                        -e TEST_RESOURCES="${env.WORKSPACE}/tests/integration/resources"
+                         """
+
+                        docker.image("${env.testEnvironmentImage}").inside(dockerArgs) {
+                            sh "pytest -s tests/integration --image ${params.ecrRegistry}/${params.imageName}:${env.testBuildTag} --sagemaker-role ${env.sagemakerRole}"
+                            sh "rm -rf tests/integration/__pycache__"
+                            sh "rm -rf .pytest_cache"
+                        }
+                    }
+                }
+            }
+        }
+        stage('Release'){
+            when{
+                expression {env.stableRelease == "true"}
+            }
+            steps{
+                script{ // login into dockerhub
+                    withCredentials(
+                            [[
+                                     $class          : 'UsernamePasswordMultiBinding',
+                                     credentialsId   : 'dockerhub',
+                                     usernameVariable: 'USERNAME',
+                                     passwordVariable: 'PASSWORD'
+                             ]]) {
+                        sh "docker login -u ${USERNAME} -p ${PASSWORD}"
+                    }
+                }
+                script {
+                    def releaseVersion = readFile "${env.WORKSPACE}/VERSION"
+                    echo "${releaseVersion}"
+                    def releaseImage = "${params.imageName}:${releaseVersion}"
+                    sh """
+                    docker tag ${params.ecrRegistry}/${params.imageName}:${env.testBuildTag} ${env.ecrRegistry}/${releaseImage} && \
+                    docker tag ${params.ecrRegistry}/${params.imageName}:${env.testBuildTag} ${releaseImage} && \
+                    docker push ${env.ecrRegistry}/${releaseImage} && \
+                    docker push ${releaseImage}
+                    """
+                }
+                script{
+                    print('Set Release tag')
+                    def releaseVersion = readFile "${env.WORKSPACE}/VERSION"
+                    sshagent([env.GitDeployKey]) {
+                        sh """#!/bin/bash -ex
+                            if [ `git tag | grep -x ${releaseVersion}` ]; then
+                                echo 'Removing existing git tag'
+                                git tag -d ${releaseVersion}
+                                git push origin :refs/tags/${releaseVersion}
+                            fi
+                            git tag ${releaseVersion}
+                            git push origin ${releaseVersion}
+                        """
+                    }
+                }
+            }
+        }
+
+    }
+
+    post {
+        cleanup {
+            script { // Remove temporary image that was used during testing
+                withCredentials([file(credentialsId: env.awsCredentialsId, variable: 'awsCredentialsId')]) {
+                sh """  
+                   docker run --env-file ${awsCredentialsId} \
+                   amazon/aws-cli ecr batch-delete-image --region ${env.awsRegion} \
+                   --repository-name ${env.imageName} --image-ids imageTag=${env.testBuildTag}
+                """
+                }
+            }
+            deleteDir()
+        }
+    }
+}
